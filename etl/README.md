@@ -1,60 +1,73 @@
-# \# Procesos ETL - Pentaho Data Integration
+# Procesos ETL · Pentaho Data Integration
 
-# 
+## 1. Herramientas
 
-# \## 1. Motor y versión
+| Elemento | Detalle |
+|---|---|
+| Herramienta | Pentaho Data Integration (PDI) Community Edition 9.4 (Kettle) |
+| Destino | MySQL 8.0.46, base `matricula` |
+| Driver JDBC | MySQL Connector/J 5.1.49 (copiar a la carpeta `lib` de PDI) |
+| Codificación | UTF-8 |
 
-# \* \*\*Herramienta:\*\* Pentaho Data Integration (PDI) Community Edition 9.4 (Kettle)\[cite: 5].
+## 2. Variables
 
-# \* \*\*Motor de Base de Datos destino:\*\* MySQL 8.0.46 (almacén de datos local `matricula`)\[cite: 2, 4].
+Las transformaciones no tienen rutas ni credenciales escritas. Todo se lee de cinco variables que cada integrante define en su archivo `kettle.properties` (en Windows: `C:\Users\<usuario>\.kettle\kettle.properties`). Ese archivo no se sube al repositorio. Después de editarlo hay que reiniciar Spoon.
 
-# 
+| Variable | Qué contiene | Ejemplo |
+|---|---|---|
+| `${FUENTES_DIR}` | Carpeta local con los tres archivos originales. Las transformaciones arman la ruta de cada archivo a partir de ella | `C:/bi/fuentes` |
+| `${DB_HOST}` | Servidor MySQL | `localhost` |
+| `${DB_NAME}` | Base de datos destino | `matricula` |
+| `${DB_USER}` | Usuario de carga, con privilegios solo sobre `matricula.*` | `etl` |
+| `${DB_PASS}` | Contraseña del usuario | (no se publica) |
 
-# \## 2. Parámetros de conexión (sin contraseñas)
+Ejemplo de `kettle.properties`:
 
-# La conexión a la base de datos se maneja mediante variables de entorno configuradas en el archivo `kettle.properties` local de PDI para evitar exponer credenciales en el repositorio:
+```
+FUENTES_DIR=C:/bi/fuentes
+DB_HOST=localhost
+DB_NAME=matricula
+DB_USER=etl
+DB_PASS=<contraseña>
+```
 
-# \* \*\*Host:\*\* `${DB\_HOST}` (`localhost`)
+## 3. Archivos que debe haber en `${FUENTES_DIR}`
 
-# \* \*\*Base de datos:\*\* `${DB\_NAME}` (`matricula`)
+Se descargan de datos.gov.co siguiendo `datos/descarga.md`.
 
-# \* \*\*Usuario:\*\* `${DB\_USER}` (`etl`)
+| Fuente | Archivo |
+|---|---|
+| F1 Instituciones | `MEN_INSTITUCIONES_EDUCACIÓN_SUPERIOR_20261023.csv` |
+| F2 Matrícula | `MEN_MATRICULA_ESTADISTICA_ES_20261023.csv` (unos 99 MB, no está en el repositorio) |
+| F3 DIVIPOLA | `DIVIPOLA-_Códigos_municipios_20261023.xml` |
 
-# \* \*\*Contraseña:\*\* `${DB\_PASS}` \*(Variable aislada por seguridad)\*\[cite: 1, 2]
+## 4. Trabajo y orden de ejecución
 
-# \* \*\*Codificación:\*\* `UTF-8`
+El trabajo `trabajos/j_carga_dw.kjb` ejecuta las transformaciones en este orden. Las dimensiones van primero porque la tabla de hechos busca en ellas sus llaves subrogadas.
 
-# \* \*\*Driver JDBC:\*\* MySQL Connector/J 5.1.49
+| # | Transformación | Fuente | Destino | Qué hace |
+|---|---|---|---|---|
+| 1 | `t_dim_geografia.ktr` | F3 (XML) | `dim_geografia` | Cambia la coma decimal de latitud y longitud por punto y carga los municipios |
+| 2 | `t_dim_institucion.ktr` | F1 (CSV) | `dim_institucion` | Quita el punto de miles del código de la institución, elimina el carácter «¿» de los nombres y carga la dimensión |
+| 3 | `t_dim_programa.ktr` | F2 (CSV) | `dim_programa` | Deja un registro por programa, limpia el texto y carga la dimensión |
+| 4 | `t_dim_genero.ktr` | F2 (CSV) | `dim_genero` | Toma los códigos de género distintos y les asigna descripción |
+| 5 | `t_fact_matricula.ktr` | F2 (CSV) | `fact_matricula` | Elimina duplicados exactos, completa con cero los códigos de municipio de 4 dígitos, busca las cinco llaves (la llave -1 si no hay coincidencia), agrupa por la granularidad y carga con vaciado previo |
 
-# 
+Las dimensiones se cargan con *Insert/Update* y los hechos se vacían antes de cargar, por eso el trabajo se puede ejecutar varias veces con el mismo resultado.
 
-# \## 3. Ubicación esperada de las fuentes
+## 5. Cómo ejecutar
 
-# Los archivos originales de entrada deben ubicarse en la siguiente ruta local del entorno de ejecución:
+1. Cree la base con `dw/ddl/00_crear_todo.sql`.
+2. Defina las cinco variables de la sección 2 y reinicie Spoon.
+3. Abra `etl/trabajos/j_carga_dw.kjb` y ejecútelo. Debe terminar sin errores.
+4. Concilie con las consultas de `dw/conciliacion/`.
 
-# \* `C:\\bi\\fuentes\\`\[cite: 5]
+## 6. Resultado esperado
 
-# &#x20; \* `MEN\_INSTITUCIONES\_EDUCACIÓN\_SUPERIOR\_20261023.csv` (F1)
+| Fuente | Leídos | Cargados | Descartados |
+|---|---|---|---|
+| F1 Instituciones | 361 | 361 | 0 |
+| F2 Matrícula | 390.903 | 230.078 | 160.825 (106.609 duplicados exactos y 54.216 por agrupar a la granularidad) |
+| F3 DIVIPOLA | 1.122 | 1.122 | 0 |
 
-# &#x20; \* `MEN\_MATRICULA\_ESTADISTICA\_ES\_20261023.csv` (F2 - \*Excluido del control de versiones por superar los 50 MB, listado en `.gitignore`\*)\[cite: 1, 2]
-
-# &#x20; \* `DIVIPOLA-\_Códigos\_municipios\_20261023.xml` (F3)\[cite: 2]
-
-# 
-
-# \## 4. Orden de ejecución del trabajo (.kjb)
-
-# El proceso de carga se automatiza mediante el trabajo principal ubicado en `etl/trabajos/j\_carga\_dw.kjb`, el cual ejecuta las transformaciones en el siguiente orden estricto para mantener la integridad de las llaves foráneas\[cite: 1, 2]:
-
-# 
-
-# 1\. \*\*`t\_dim\_geografia.ktr`\*\* — Lee el catálogo XML de DIVIPOLA, normaliza coordenadas y carga la dimensión geográfica.
-
-# 2\. \*\*`t\_dim\_institucion.ktr`\*\* — Lee el CSV de instituciones y carga la dimensión de instituciones.
-
-# 3\. \*\*`t\_dim\_programa.ktr`\*\* — Procesa y carga los datos asociados a la dimensión de programas académicos desde el archivo de matrícula.
-
-# 4\. \*\*`t\_dim\_genero.ktr`\*\* — Extrae y mapea los códigos de género para la dimensión correspondiente.
-
-# 5\. \*\*`t\_fact\_matricula.ktr`\*\* — \*\[Al final]\* Lee el archivo masivo de matrícula, elimina duplicados exactos, valida búsquedas contra las dimensiones (asignando la fila "Desconocido" `-1` de ser necesario), agrupa por la granularidad de las cinco llaves y carga la tabla de hechos con truncamiento previo.
-
+`fact_matricula` queda con 230.078 filas.

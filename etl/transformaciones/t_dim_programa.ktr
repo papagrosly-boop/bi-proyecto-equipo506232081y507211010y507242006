@@ -612,7 +612,7 @@
       <method>none</method>
       <schema_name/>
     </partitioning>
-    <filename>C:\bi\fuentes\MEN_MATRICULA_ESTADISTICA_ES_20261023.csv</filename>
+    <filename>${FUENTES_DIR}/MEN_MATRICULA_ESTADISTICA_ES_20261023.csv</filename>
     <filename_field/>
     <rownum_field/>
     <include_filename>N</include_filename>

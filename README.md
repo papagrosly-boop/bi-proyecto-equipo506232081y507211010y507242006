@@ -20,12 +20,12 @@ Curso: Business Intelligence and Data Analytics · Docente: Leandro Pájaro Fuen
 | `datos/diccionarios/` | Diccionarios de datos de las fuentes (Anexo A de la Entrega 1) |
 | `datos/muestras/` | Muestras de 20 filas de cada fuente |
 | `datos/raw/` | Carpeta para los archivos originales completos (no se versionan) |
-| `dw/ddl/` | Scripts SQL que crean la base `matricula`, las tablas y la dimensión de tiempo |
+| `dw/ddl/` | Scripts SQL que crean la base `matricula`, las tablas y la dimensión de tiempo (`01` a `08`), y la tabla de predicciones del modelo (`09_pred_caida_matricula_depto.sql`) |
 | `dw/conciliacion/` | Consultas que concilian la carga contra las fuentes |
 | `etl/` | Trabajo y transformaciones de Pentaho PDI, con su propio `README.md` |
 | `dashboard/` | Tablero de Power BI (`.pbix`) y capturas |
-| `docs/` | Diagramas y documentos de cada entrega |
-| `modelo/` | Reservada para el modelo predictivo (Entrega 3) |
+| `docs/` | Diagramas (`diagramas/`) y el PDF de cada entrega (`entregas/`) |
+| `modelo/` | Modelo predictivo (Entrega 3): notebook `modelo_matricula.ipynb`, consulta `extraccion.sql`, `requirements.txt` y `datos/dataset_depto_anio.csv` |
 
 ## Fuentes de datos
 
@@ -103,7 +103,51 @@ Abra `dashboard/tablero_matricula.pbix` en Power BI Desktop. En *Transformar dat
 | 1. Matrícula | P0: concentración y evolución de la matrícula |
 | 2. Acreditación | P1: matrícula en instituciones acreditadas y no acreditadas |
 | 3. Género y áreas | P2: distribución por género en cada núcleo del conocimiento |
+| 4. Predicciones | P3: predicción de caída de matrícula por departamento, junto a los valores reales (Entrega 3) |
+
+## Cómo reproducir y visualizar el modelo (Entrega 3)
+
+El modelo responde la pregunta P3 (¿qué departamentos tendrán caída de matrícula el próximo año?). Es una clasificación binaria: para cada departamento y año predice si la matrícula del semestre 1 del año siguiente será menor que la del año actual. Compara una regresión logística y un bosque aleatorio, con división temporal (entrenamiento con años base 2016-2018, prueba con 2019-2020 y predicción para 2022).
+
+### 1. Ejecutar el notebook
+
+Las librerías y sus versiones están en `modelo/requirements.txt`. El notebook es `modelo/modelo_matricula.ipynb` y funciona de dos maneras:
+
+- **Sin acceso al data warehouse (recomendado, por ejemplo en Google Colab).** El notebook lee `modelo/datos/dataset_depto_anio.csv`, que ya está en el repositorio y es el resultado de `modelo/extraccion.sql` (231 filas). En Colab, ejecute en una celda:
+  ```
+  !git clone https://github.com/papagrosly-boop/bi-proyecto-equipo506232081y507211010y507242006.git
+  %cd bi-proyecto-equipo506232081y507211010y507242006/modelo
+  ```
+  Luego abra `modelo_matricula.ipynb` y use *Entorno de ejecución → Ejecutar todo*.
+- **Con acceso al data warehouse.** Defina las variables de entorno `DB_HOST`, `DB_NAME`, `DB_USER` y `DB_PASS` antes de abrir Jupyter. El notebook corre `extraccion.sql`, actualiza el CSV y carga las predicciones directamente en MySQL.
+
+En un entorno local, instale las librerías con:
+```
+pip install -r modelo/requirements.txt
+```
+
+Al terminar, el notebook crea la carpeta `modelo/resultados/` con `resumen_resultados.md` (tablas y métricas), `predicciones.csv`, `riesgo_proximo_anio.csv`, `carga_predicciones.sql` y las figuras (`figuras/`).
+
+### 2. Cargar las predicciones en el data warehouse
+
+1. Ejecute `dw/ddl/09_pred_caida_matricula_depto.sql`. Crea la tabla `pred_caida_matricula_depto` y la vista `vw_dim_departamento` (una fila por departamento).
+2. Cargue las 198 filas de una de estas dos maneras:
+   - Con las variables `DB_*` definidas, el notebook las inserta solo.
+   - Sin ellas, ejecute `modelo/resultados/carga_predicciones.sql` en MySQL como script completo.
+3. Verifique:
+   ```sql
+   SELECT conjunto, COUNT(*) FROM matricula.pred_caida_matricula_depto GROUP BY conjunto;
+   ```
+   Resultado esperado: 99 de entrenamiento, 66 de prueba y 33 de futuro.
+
+### 3. Ver las predicciones en el tablero
+
+Abra `dashboard/tablero_matricula.pbix` y vaya a la página **4. Predicciones**. Muestra, por departamento, la matrícula base, la matrícula real del año siguiente, si cayó realmente, si el modelo predijo caída y su probabilidad, con filtros por departamento, año objetivo y conjunto (entrenamiento, prueba o futuro). Si cambió el servidor de MySQL, actualice la conexión como en el paso 7 de la Entrega 2. La captura de la página está en `dashboard/captura_pagina_predicciones.png`.
+
+### Resultado
+
+La regresión logística fue el algoritmo elegido. En la prueba (2020-2021) detectó 7 de 18 caídas reales (recall de 38,9 %) y no alcanzó el criterio de éxito. El detalle está en el documento `docs/entregas/BI-Entrega-3-Equipo506232081.pdf`.
 
 ## Seguridad
 
-Las contraseñas no están en el repositorio. PDI las lee de `kettle.properties` mediante las variables `${DB_USER}` y `${DB_PASS}`.
+Las contraseñas no están en el repositorio. PDI las lee de `kettle.properties` mediante las variables `${DB_USER}` y `${DB_PASS}`, y el notebook las lee de variables de entorno.
